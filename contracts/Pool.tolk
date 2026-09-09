@@ -580,7 +580,7 @@ fun onInternalMessage(in: InMessage) {
 
                 if (storage.nominatorsAmount > 0) {
                     val ownerShare = mulDivFloor(profit, storage.ownerShare, SHARE_BASE);
-                    val nominatorsProfit = profit - ownerShare;
+                    val nominatorsProfit = max(profit - ownerShare, 0);
                     storage.nominatorsAmount = max(storage.nominatorsAmount + nominatorsProfit, 0);
                 }
 
