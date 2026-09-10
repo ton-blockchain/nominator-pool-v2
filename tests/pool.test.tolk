@@ -521,7 +521,7 @@ get fun `test reward withdrawal should be rejected when share delta is zero`() {
     ).toHaveRefund<TextComment>({ from: pool.address, to: testNm.address, error: ErrorsPool.NothingToWithdraw, previousState: stateBefore });
 }
 
-get fun `test if pool received loss, nominators stake should not decrease in price`() {
+get fun `test if pool received loss within owner share, nominators stake should not decrease in price`() {
     val (elector, stakes, limits) = setupElector();
     val (pool, _owner, _notOwner, validator, nominators) = setupPoolWithNominators(40);
 
@@ -558,10 +558,18 @@ get fun `test if pool received loss, nominators stake should not decrease in pri
     val expectedLoss = returnedStake - calculateGasFee(BASECHAIN, RECOVER_STAKE_OK_GAS) - used;
 
     expect(expectedLoss).toBeLess(0);
-    // Loss is charged from the owner share alone, nominators take no part in it
-    val expectedProxy = valInfo.usage.prevRoundUsage!.proxy;
 
-    val sharesBefore = pool.getSharesInfo();
+    // Owner equity as the contract books it on recovery: projected balance
+    // (punishment reserves included, they exist to absorb losses) minus
+    // nominator obligations. Note get_shares_info ownerShareValue is not
+    // usable here: it nets out the punishment reserve and clamps at zero,
+    // while the loss booking counts both. The loss fits into the owner
+    // share, so per the owner first loss rule nominators take no part in it.
+    val invBefore = pool.getPoolInvariants();
+    val ownerEquityBefore = invBefore.projectedBalance - invBefore.nominatorsAmount;
+    expect(expectedLoss + ownerEquityBefore).toBeGreater(0);
+
+    val expectedProxy = valInfo.usage.prevRoundUsage!.proxy;
 
     val res = net.send(
         address.fromWorkchainAndHash(MASTERCHAIN, expectedProxy),
@@ -587,8 +595,9 @@ get fun `test if pool received loss, nominators stake should not decrease in pri
     // Loss should not propagate to nominatorsAmount
     expect(poolAfter.nominatorsAmount).toEqual(poolBefore.nominatorsAmount);
 
-    expect(sharesBefore.ownerShareValue + expectedLoss).toBeLess(0);
-    // Since owner share is less then 0, get method returns 0
+    // Owner equity after absorbing the loss is still positive, but the
+    // getter nets out the per active slot punishment reserve on top of it,
+    // so from the getter's conservative viewpoint the owner share is 0
     val sharesAfter = pool.getSharesInfo();
     expect(sharesAfter.ownerShareValue).toEqual(0);
     expect(sharesAfter.liquidOwnerShare).toEqual(0);
@@ -637,6 +646,11 @@ get fun `test extreme slashing should not throw exceeds recovered value`() {
     // Simulate 99.9% slash. practically the proxy will send guaranteed minimum of 0.1 TON
     val slashedReturn = calculateGasFee(BASECHAIN, RECOVER_STAKE_OK_GAS) - 1;
 
+    // Owner equity (punishment reserves included) before the return,
+    // on the same terms the loss booking uses
+    val invBefore = pool.getPoolInvariants();
+    val ownerEquityBefore = invBefore.projectedBalance - invBefore.nominatorsAmount;
+
     val res = net.send(
         address.fromWorkchainAndHash(MASTERCHAIN, expectedProxy),
         createMessage({
@@ -673,16 +687,28 @@ get fun `test extreme slashing should not throw exceeds recovered value`() {
     // Just for logging purposes
     expect(getInternalMessageValue(refundMsg.info).grams).toEqual(0);
 
-    // Loss should be charged from the owner share alone,
-    // nominatorsAmount must not decrease
-    // profit = 0 (clamped returned) - tonUsed = -tonUsed
+    // The whole used amount is lost: profit = 0 (clamped returned) - tonUsed.
+    // The loss exceeds the owner share, so per the owner first loss rule
+    // nominators bear exactly the excess beyond the owner equity
     val expectedProfit = -used;
     expect(expectedProfit).toBeLess(0);
-    expect(poolAfter.nominatorsAmount).toEqual(poolBefore.nominatorsAmount);
+    expect(expectedProfit + ownerEquityBefore).toBeLess(0);
 
-    // Nominator stake price should stay the same
+    // Nominators bear exactly the raw loss (credited value - used, no gas
+    // netting) beyond the owner equity. Here returned clamps to zero, so
+    // the whole credited value (just the gas allowance) stays in the
+    // owner's booked equity. The recover tx storage fee is collected
+    // before the booking reference, so it is the only correction read
+    // back from the result
+    val recoverTx = res.findTransaction<RecoverStakeOk>({ to: pool.address });
+    val storageFees = getTxStorage(recoverTx!).storageFeesCollected;
+    expect(poolAfter.nominatorsAmount as int).toEqual(
+        invBefore.nominatorsAmount + slashedReturn - used + ownerEquityBefore - storageFees,
+    );
+
+    // Nominator stake price should drop accordingly
     val nmAfter = pool.getNominatorData(testNm.getWorkchainAndHash().1);
-    expect(nmAfter.amount).toEqual(nmBefore.amount);
+    expect(nmAfter.amount).toBeLess(nmBefore.amount);
 
     // Even-round usageState bit should be cleared (parity: false = even)
     val validatorAfter = pool.getValidatorInfo(validator);
@@ -785,7 +811,7 @@ get fun `test stake profit smaller than refundBonus should not award bonus`() {
     expect(infoBody.info.returned - infoBody.info.used).toEqual(expectedProfit);
 }
 
-get fun `test deep losses should put pool nm operations into insolvent state`() {
+get fun `test loss exceeding owner share should be borne by nominators`() {
     val (elector, stakes, limits) = setupElector();
     val (pool, owner, _notOwner, validator, nominators) = setupPoolWithNominators(40);
 
@@ -811,12 +837,25 @@ get fun `test deep losses should put pool nm operations into insolvent state`() 
     val valInfo = waitTillRecovery(pool, validator, elector.address);
 
     val testNm = nominators.get(random.range(40 - 1));
+    val nmHash = testNm.getWorkchainAndHash().1;
 
     // Let's say we now got 10% loss
 
     val used = valInfo.usage.prevRoundUsage!.usage.tonUsed;
     val expectedProxy = valInfo.usage.prevRoundUsage!.proxy;
     val returnedStake = mulDivFloor(used, 9000, 10000);
+    val expectedLoss = returnedStake - calculateGasFee(BASECHAIN, RECOVER_STAKE_OK_GAS) - used;
+    expect(expectedLoss).toBeLess(0);
+
+    // Owner equity (punishment reserves included) before the return, on the
+    // same terms the loss booking uses. The loss exceeds it, so per the
+    // owner first loss rule the owner is drained to zero and nominators
+    // bear exactly the excess beyond the owner equity
+    val invBefore = pool.getPoolInvariants();
+    val ownerEquityBefore = invBefore.projectedBalance - invBefore.nominatorsAmount;
+    expect(expectedLoss + ownerEquityBefore).toBeLess(0);
+
+    val nmBefore = pool.getNominatorData(nmHash);
     var sharesBefore = pool.getSharesInfo();
     var res = net.send(
         address.fromWorkchainAndHash(MASTERCHAIN, expectedProxy),
@@ -837,14 +876,25 @@ get fun `test deep losses should put pool nm operations into insolvent state`() 
     expect(res).toHaveSuccessfulTx<RecoverStakeOk>({ to: pool.address });
 
     val poolAfter = pool.getPoolData();
-    // Projected total balance
-    val poolBalance = testing.getAccountBalance(pool.address) +
-    poolAfter.validators.load().stakeUsed;
-    // Less than total nominators obligations
-    expect(poolBalance).toBeLess(poolAfter.nominatorsAmount);
+    val recoverTx = res.findTransaction<RecoverStakeOk>({ to: pool.address });
+    val storageFees = getTxStorage(recoverTx!).storageFeesCollected;
+    expect(poolAfter.nominatorsAmount as int).toEqual(
+        invBefore.nominatorsAmount + returnedStake - used + ownerEquityBefore - storageFees,
+    );
+
+    // Each individual nominator stake loses value accordingly
+    val nmAfter = pool.getNominatorData(nmHash);
+    expect(nmAfter.amount).toBeLess(nmBefore.amount);
+
+    // The owner equity is drained to exact zero, so the pool ends up
+    // insolvent by the fees dust of the loss transaction itself, instead
+    // of going deeply underwater like it did with the owner only loss
+    // booking
+    val invAfterLoss = pool.getPoolInvariants();
+    expect(invAfterLoss.projectedBalance).toBeLess(invAfterLoss.nominatorsAmount);
 
     var sharesAfter = pool.getSharesInfo();
-    expect(sharesAfter.nominatorsAmount).toEqual(sharesBefore.nominatorsAmount);
+    expect(sharesAfter.nominatorsAmount).toBeLess(sharesBefore.nominatorsAmount);
     expect(sharesAfter.poolSupply).toEqual(sharesBefore.poolSupply);
     expect(sharesAfter.ownerShareValue).toBeLess(sharesBefore.ownerShareValue);
     expect(sharesAfter.ownerShareValue).toEqual(0);
@@ -854,7 +904,8 @@ get fun `test deep losses should put pool nm operations into insolvent state`() 
     sharesBefore = sharesAfter;
 
     val stateBefore = getAccountData(pool.address);
-    // So no withdrawals accepted
+    // At the boundary the strict solvency gate still rejects everything
+    // until fresh equity arrives: no withdrawals accepted
     res = pool.sendTextComment(
         testNm,
         "w".beginParse(),
@@ -954,20 +1005,24 @@ get fun `test deep losses should put pool nm operations into insolvent state`() 
 
     res = waitAndRecoverStake(pool, validator, elector.address);
     expect(res).toHaveSuccessfulTx<RecoverStakeOk>({ to: pool.address });
-    val balanceAfter = testing.getAccountBalance(pool.address);
-    expect(balanceAfter).toBeGreater(poolAfter.nominatorsAmount);
+    // The profit restores owner equity, moving the pool back above the
+    // solvency boundary
+    val invRecovered = pool.getPoolInvariants();
+    expect(invRecovered.projectedBalance).toBeGreater(invRecovered.nominatorsAmount);
 
     sharesAfter = pool.getSharesInfo();
-    expect(sharesAfter.nominatorsAmount).toBeGreater(sharesBefore.nominatorsAmount);
     expect(sharesAfter.poolSupply).toEqual(sharesBefore.poolSupply);
     expect(sharesAfter.ownerShareValue).toBeGreater(sharesBefore.ownerShareValue);
     expect(sharesAfter.liquidOwnerShare).toBeGreater(sharesBefore.liquidOwnerShare);
 
-    // All operations should work again
-    asssertSimpleWithdawal(pool, testNm);
+    // All operations work again. With no stakes left in flight the deposit
+    // is processed instantly
     val depositor = testing.treasury("Depositor");
     assertPoolDepositInstant(pool, depositor.address, stakes.minStake * 2);
 
+    asssertSimpleWithdawal(pool, testNm);
+
+    // Rewards accrued from the profitable round are withdrawable again
     var rewardNm = nominators.get(random.range(41));
     while (rewardNm == testNm) {
         rewardNm = nominators.get(random.range(41));
@@ -979,6 +1034,105 @@ get fun `test deep losses should put pool nm operations into insolvent state`() 
         { value: WITHDRAWAL_GAS },
     );
     expect(res).toHaveTx<WithdrawSuccess>({ to: rewardNm });
+}
+
+get fun `test losses beyond owner share make pool insolvent but by tiny fee threshold`() {
+    val (elector, stakes, limits) = setupElector();
+    val (pool, _owner, notOwner, validator, nominators) = setupPoolWithNominators(40);
+
+    runRound(
+        pool,
+        elector,
+        stakes,
+        limits,
+        validator,
+        0,
+        false,
+    );
+    runRound(
+        pool,
+        elector,
+        stakes,
+        limits,
+        validator,
+        0,
+        true,
+    );
+
+    val valInfo = waitTillRecovery(pool, validator, elector.address);
+
+    val testNm = nominators.get(random.range(40 - 1));
+    val nmHash = testNm.getWorkchainAndHash().1;
+    val topupThreshold = ton("0.1"); // Pool is supposed to get insolvent by tiny gas amount
+
+    // Let's say we now got 50% stake loss
+
+    val used = valInfo.usage.prevRoundUsage!.usage.tonUsed;
+    val expectedProxy = valInfo.usage.prevRoundUsage!.proxy;
+    val returnedStake = mulDivFloor(used, 5000, 10000);
+    val expectedLoss = returnedStake - calculateGasFee(BASECHAIN, RECOVER_STAKE_OK_GAS) - used;
+    expect(expectedLoss).toBeLess(0);
+
+    val nmBefore = pool.getNominatorData(nmHash);
+    var sharesBefore = pool.getSharesInfo();
+    var res = net.send(
+        address.fromWorkchainAndHash(MASTERCHAIN, expectedProxy),
+        createMessage({
+            bounce: false,
+            dest: pool.address,
+            value: returnedStake,
+            body: RecoverStakeOk {
+                queryId: 0,
+                remaining: ProxyResponseData {
+                    validator,
+                    parity: false, // W're returning round 0 stake
+                }.toCell()
+                    .beginParse(),
+            },
+        }),
+    );
+    expect(res).toHaveSuccessfulTx<RecoverStakeOk>({ to: pool.address });
+
+    val nmAfter = pool.getNominatorData(nmHash);
+    expect(nmBefore.amount - nmAfter.amount).toBeGreater(ton("0.1"));
+
+    var sharesAfter = pool.getSharesInfo();
+    // Much larger than topup threshold
+    expect(sharesBefore.nominatorsAmount - sharesAfter.nominatorsAmount).toBeGreater(ton("100"));
+
+    val stateBefore = getAccountData(pool.address);
+    res = pool.sendTextComment(
+        testNm,
+        "w".beginParse(),
+        { value: stakes.minStake * 2 },
+    );
+    // Pool got insolvent
+    expect(
+        res,
+    ).toHaveRefund<TextComment>({
+        to: testNm,
+        from: pool.address,
+        error: ErrorsPool.Insolvent,
+        previousState: stateBefore,
+        initialBalance: testing.getAccountBalance(
+            pool.address,
+        ),
+    });
+
+    pool.sendAddFunds(notOwner.address, DEFAULT_QUERY_ID, { value: topupThreshold });
+
+    // Now withdrawal is allowed again
+    asssertSimpleWithdawal(pool, testNm);
+
+    // However since it didn't put the owher share to a stakeable threshold, new stakes still denied
+    val elections = announceElections(elector);
+    assertNewStakeFailed(
+        ErrorsPool.OwnerShareIsUndercapitalized,
+        validator,
+        pool,
+        elections,
+        stakes.minStake * 2,
+    );
 }
 
 get fun `test in open round, if pool doesn't have enough balance to withdraw, it shold make withdrawal pending`() {

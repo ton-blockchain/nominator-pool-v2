@@ -16,6 +16,16 @@ type OwnerMessages =
     | RemoveValidator
     | OwnerWithdrawal
 
+fun calcOwnerShare(
+    stakeUsed: coins,
+    nominatorsAmount: coins,
+    pendingDeposits: coins,
+): coins {
+    val availableBalance = contract.getOriginalBalance() - pendingDeposits - POOL_MIN_STORAGE;
+    val totalBalance = availableBalance + stakeUsed;
+    return totalBalance - nominatorsAmount;
+}
+
 fun processOwnerAction(msgSlice: slice, storage: Storage, sender: address, value: coins): bool {
     val msg = lazy OwnerMessages.fromSlice(msgSlice);
     var handled = true;

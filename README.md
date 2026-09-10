@@ -28,7 +28,7 @@ A Tolk-based smart contract protocol for The Open Network (TON) that enables del
 ## General Principles
 
 ### 1. Delegated Staking
-The pool aggregates TON from **nominators** (delegators) and makes them available to whitelisted **validators** for participation in the TON validator elections. Recovery profit is split between owner equity and nominators according to `ownerShare`; recovery losses are charged entirely to owner equity, so the nominator share price never decreases.
+The pool aggregates TON from **nominators** (delegators) and makes them available to whitelisted **validators** for participation in the TON validator elections. Recovery profit is split between owner equity and nominators according to `ownerShare`; under the **owner first-loss rule**, recovery losses are charged to owner equity first, and nominators bear only the excess beyond it.
 
 ### 2. Share-Based Accounting
 The pool uses a **share/token model**:
@@ -59,7 +59,7 @@ If a pending-operation chain cannot be started because the liquid balance cannot
 
 Critical differences are:
 
-1. The v1 validator role is split into an `owner`, who carries out pool management, accrues profit, and bears all recovery losses, and a `validator` that is purely technical worker role allowed to only operate staking process with no profit share.
+1. The v1 validator role is split into an `owner`, who carries out pool management, accrues profit, and bears recovery losses first, and a `validator` that is purely technical worker role allowed to only operate staking process with no profit share.
 2. Pool can now operate with up to 32 validators, where a single validator is able to stake in two consecutive rounds via its odd/even proxies.
 3. Validator expenses are compensated by `refundBonus` for rounds profitable enough to cover the bonus.
 
@@ -69,13 +69,13 @@ Critical differences are:
 
 | Area | Original TON Nominator Pool | This implementation |
 |------|-----------------------------|---------------------|
-| **Position and rewards** | Stores an address-bound active TON balance and pending deposit balance. Each round's reward is added proportionally to the active balance. | Stores address-bound internal shares priced by `nominatorsAmount / poolSupply`; profit raises the share price, losses never lower it. Shares are accounting units, **not transferable Jettons or liquid-staking tokens**. |
+| **Position and rewards** | Stores an address-bound active TON balance and pending deposit balance. Each round's reward is added proportionally to the active balance. | Stores address-bound internal shares priced by `nominatorsAmount / poolSupply`; profit raises the share price, and losses lower it only when they exceed owner equity. Shares are accounting units, **not transferable Jettons or liquid-staking tokens**. |
 | **Reward claims** | Rewards compound, but there is no separate claim operation. | Rewards compound and can be claimed with comment `"r"` without withdrawing principal, subject to `minWithdrawableRewards` limit. |
 | **Withdrawals** | Comment `"w"` exits the entire position, including pending deposits. Partial withdrawal is unsupported. | Comment `"w"` withdraws all current shares, while `"r"` withdraws rewards. Arbitrary partial-principal withdrawal is unsupported, and `"w"` **does not cancel a pending deposit**, which may enter the pool later. |
 | **Pending operations** | Records requests in the pool and pays them through a later permissionless processing call. New staking is blocked while withdrawals remain. | Uses asynchronous per-user `PayoutItem` contracts at clean round boundaries. Insufficient liquidity can halt new stakes and owner withdrawals until recovery and rotation restore progress; nominator withdrawals/rewards are routed to pending mode. |
 | **Admission** | Designed and tested for at most 40 nominators and a recommended 10,000 TON minimum stake. Capacity and minimum stake are immutable. | Configures up to 1,023 nominators, subject to dictionary-depth limits. The owner can update the minimum stake and count limit and can apply an optional deposit whitelist. |
 | **Workchains and deposit cost** | Nominator wallets must be in the masterchain. Each deposit has a fixed 1 TON deduction. | Nominator wallets may be in any workchain. `DEPOSIT_GAS` is 0.2 TON, with unused gas normally returned; the pool itself runs in the lower-cost basechain. |
-| **Penalty exposure** | Losses consume the validator's balance first; nominators bear whatever exceeds it. | Nominators never bear losses. Owner equity absorbs them in full; if it is insufficient, the pool goes insolvent, withdrawals are delayed, not reduced, until recovery restores the balance. |
+| **Penalty exposure** | Losses consume the validator's balance first; nominators bear whatever exceeds it. | Same cushion-first mechanics, but the cushion is owner equity. Unlike v1, owner equity must be capitalized to the worst-case punishment fine for all active slots before each `new_stake`, and an excess loss makes the pool insolvent, delaying withdrawals until it is topped up. |
 | **Governance** | Nominators can signal on network proposals with `y<HASH>` and `n<HASH>`. | No voting interface is implemented; only `"d"`, `"w"`, and `"r"` nominator comments are accepted. |
 
 #### For Validators
@@ -86,7 +86,7 @@ Critical differences are:
 | **Wallet and elector access** | The validator wallet and pool both reside in the masterchain, and the wallet operates the pool directly. | Validator wallets may reside in any workchain. Deterministic stateless proxies in the masterchain forward stake and recovery messages to the elector. |
 | **Round participation** | The single validator submits one pool stake according to the original state machine. | Each validator can be assigned odd, even, or all rounds. An all-round validator can have two concurrent slots through separate parity proxies. |
 | **Stake limits** | Pool-wide immutable minimums and available funds constrain the validator. | Global limits and optional per-validator fixed-TON or proportional-share caps constrain each validator and can be changed by the owner. |
-| **Funds and penalties** | The validator maintains its own balance in the pool. This balance receives commission, funds operations, and absorbs losses before nominators. | Validators have no individual pool balance or first-loss account. Owner equity supplies capitalization and absorbs all recovery losses, while recovered profit is shared globally according to `ownerShare`. |
+| **Funds and penalties** | The validator maintains its own balance in the pool. This balance receives commission, funds operations, and absorbs losses before nominators. | Validators have no individual pool balance or first-loss account. Owner equity supplies capitalization and absorbs recovery losses, while recovered profit is shared globally according to `ownerShare`. |
 | **Operating costs** | The original documentation estimates about 5 TON per round, paid by the validator. | A configurable `refundBonus` compensates a validator after a sufficiently profitable recovery. Part is borne by owner equity and part reduces profit before it is split with nominators. |
 | **Recovery liveness** | Validator-set updates, recovery, and withdrawal processing can be funded by anyone if the validator disappears. | `UpdateVset` and unrestricted recovery can also be funded by third parties; new stake submission remains validator-only. |
 
@@ -98,7 +98,7 @@ The original contract has no separate owner role: its single immutable validator
 |------|-----------------------------|---------------------|
 | **Authority** | The immutable validator wallet submits stakes, adds validator funds, and withdraws funds not owed to nominators. | A separate owner manages pool configuration and owner equity. Validators are limited to staking and recovery operations. |
 | **Configuration** | Validator address, reward share, capacity, and minimum stakes are fixed at deployment. | The owner can manage validators, validator limits, nominator minimum/count, whitelist, and `refundBonus`. `ownerShare`, `minWithdrawableRewards`, and round allowances remain immutable. |
-| **Economics** | Positive reward pays immutable `validator_reward_share`; validator funds bear losses first. | Profit is allocated by immutable `ownerShare`; losses are borne solely by owner equity. A mutable `refundBonus` may reduce distributable profit, so users should monitor current settings. |
+| **Economics** | Positive reward pays immutable `validator_reward_share`; validator funds bear losses first. | Profit is allocated by immutable `ownerShare`; losses are charged to owner equity first. A mutable `refundBonus` may reduce distributable profit, so users should monitor current settings. |
 | **Owner withdrawals** | The validator can withdraw its accounted balance and otherwise unallocated funds while preserving nominator liabilities and the storage reserve. | The owner can withdraw only liquid owner equity remaining after nominator liabilities, pending deposits, storage reserve, and punishment capitalization. |
 | **Operational scale** | One masterchain pool serves one validator and a small tested nominator set. | One basechain pool coordinates multiple validators through masterchain proxies and processes large pending sets asynchronously. |
 
@@ -148,7 +148,7 @@ The original limits and behavior above are based on its [pool-v1 README](https:/
 | `mainValidator` | `address` | The first validator address, registered during initialization. |
 | `roundAllowance` | `RoundAllowance` | Which rounds the validator may participate in: `InOddRounds`, `InEvenRounds`, or `InAllRounds`. |
 | `limit` | `ValidatorLimit?` | Optional per-validator staking limit. Can be an absolute TON cap (`ValidatorLimitTon`) or a share of total pool balance (`ValidatorLimitShare`). |
-| `ownerShare` | `uint25` | The owner's share of recovery profit, expressed as parts of `SHARE_BASE` (2^24). `SHARE_BASE` assigns all profit to owner equity; `0` assigns it all to nominators. Losses are always charged to owner equity regardless of this setting. |
+| `ownerShare` | `uint25` | The owner's share of recovery profit, expressed as parts of `SHARE_BASE` (2^24). `SHARE_BASE` assigns all profit to owner equity; `0` assigns it all to nominators. Losses are charged to owner equity first regardless of this setting. |
 | `maxTonPerValidator` | `coins` | Global maximum stake any single validator may use from the pool. |
 | `minTonPerValidator` | `coins` | Global minimum stake a validator must request for a `new_stake`. |
 | `refundBonus` | `uint33` | Flat bonus compensating the validator for the staking "happy path" (NewStake fee + RecoverStake fee + external operational costs), capped at ~8.6 TON. See [Validator Refunds](#validator-refunds-automatic). |
@@ -331,13 +331,13 @@ To avoid unbounded map iteration inside a single transaction:
 - If insufficient liquidity prevents a chain from starting, the pool halts; nominator withdrawals and rewards requested during the halt are queued as pending, and a later rotation retries processing.
 
 ### Punishment / Slashing Reserve
-The pool requires owner equity to participate in validator risk. Before each `new_stake`, after counting the prospective slot, the contract checks that owner equity is at least the worst-case punishment fine for a minimum-size stake multiplied by the resulting number of active slots. The punishment amount is derived from TON config param 40 (misbehavior fines), scaled by severity and duration multipliers. Recovery losses are charged entirely to owner equity; this reserve is the capitalization that lets it absorb them.
+The pool requires owner equity to participate in validator risk. Before each `new_stake`, after counting the prospective slot, the contract checks that owner equity is at least the worst-case punishment fine for a minimum-size stake multiplied by the resulting number of active slots. The punishment amount is derived from TON config param 40 (misbehavior fines), scaled by severity and duration multipliers. Recovery losses are charged to this equity first; the reserve is the capitalization that lets it absorb them.
 
 ### Validator Refunds (Automatic)
 
 Validators **do not need to maintain a separate wallet balance** to track gas/TON tied up in the pool. The contract compensates the validator for the staking "happy path" costs via a single flat **`refundBonus`** parameter.
 
-For accounting, the bonus is split into two parts. The **owner-only part** is one third of `refundBonus`, capped at 1 TON, and is borne entirely by owner equity. The remaining **shared part** is deducted from the recovered value before the residual profit is divided according to `ownerShare`; a residual loss is charged to owner equity alone.
+For accounting, the bonus is split into two parts. The **owner-only part** is one third of `refundBonus`, capped at 1 TON, and is borne entirely by owner equity. The remaining **shared part** is deducted from the recovered value before the residual profit is divided according to `ownerShare`; a residual loss is charged to owner equity first.
 
 - On successful `recover_stake_ok`, the pool calculates net profit (recovered amount minus staked amount).
 - If the round was unprofitable (slashed or no profit), no bonus is paid. The validator's overspend on unsuccessful operations must be resolved directly with the pool owner if necessary.
@@ -604,7 +604,7 @@ The pool exposes several getters for off-chain queries. Only `owner()` and `get_
 All elector responses (`NewStakeOk`, `NewStakeError`, `RecoverStakeOk`, `RecoverStakeError`) are authenticated by deriving the expected proxy address from proxy code and `(pool, validator, roundParity)`. This prevents spoofed responses.
 
 ### Owner Share requirements
-Before `new_stake`, the contract ensures owner equity covers the worst-case minimum-stake punishment multiplied by the resulting active slot count. Recovery losses are charged entirely to owner equity; see Solvency Check for the case where they exceed it.
+Before `new_stake`, the contract ensures owner equity covers the worst-case minimum-stake punishment multiplied by the resulting active slot count. Recovery losses are charged to this equity first; when they exceed it, see Solvency Check for insolvency handling.
 
 ### Solvency Check
 Before processing nominator deposits/withdrawals, the pool verifies that its **projected balance** (`balance - incomingValue - pendingDeposits - POOL_MIN_STORAGE + stakeUsed`) exceeds `nominatorsAmount`; otherwise the message is rejected. `get_pool_invariants()` exposes a matching projected balance (without the incoming-value term) for off-chain solvency monitoring.

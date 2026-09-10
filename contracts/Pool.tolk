@@ -554,6 +554,7 @@ fun onInternalMessage(in: InMessage) {
 
             val profit = returned - stakeReturned.tonUsed;
 
+            val usedBefore = validators.stakeUsed;
             validators.stakeUsed = max(validators.stakeUsed - stakeReturned.tonUsed, 0);
             validators.activeSlots = max(validators.activeSlots - 1, 0);
 
@@ -580,7 +581,27 @@ fun onInternalMessage(in: InMessage) {
 
                 if (storage.nominatorsAmount > 0) {
                     val ownerShare = mulDivFloor(profit, storage.ownerShare, SHARE_BASE);
-                    val nominatorsProfit = max(profit - ownerShare, 0);
+                    var nominatorsProfit = max(profit - ownerShare, 0);
+                    if (profit < 0) {
+                        val curOwnerShare = calcOwnerShare(
+                            usedBefore, // This way we get owner share before the return
+                            storage.nominatorsAmount,
+                            storage.pendingDeposits,
+                        )
+                        - returned;
+
+                        // If current owner share is positive, book negative part as nominators loss.
+                        // Otherwise owner is already under water, book full owner loss part to the
+                        // nominators.
+                        // In case owner share can cover the loss owner delta would be zero -> no loss propagates to the nominators
+                        val ownerDelta = curOwnerShare > 0
+                            ? min(
+                                curOwnerShare + profit,
+                                0,
+                            ) // + because both negative values, full profit
+                            : profit; // Full loss goes to nominators if no owner share available
+                        nominatorsProfit += ownerDelta;
+                    }
                     storage.nominatorsAmount = max(storage.nominatorsAmount + nominatorsProfit, 0);
                 }
 
