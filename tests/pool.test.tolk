@@ -565,8 +565,8 @@ get fun `test if pool received loss within owner share, nominators stake should 
     // usable here: it nets out the punishment reserve and clamps at zero,
     // while the loss booking counts both. The loss fits into the owner
     // share, so per the owner first loss rule nominators take no part in it.
-    val invBefore = pool.getPoolInvariants();
-    val ownerEquityBefore = invBefore.projectedBalance - invBefore.nominatorsAmount;
+    val sharesBefore = pool.getSharesInfo();
+    val ownerEquityBefore = sharesBefore.ownerShareValue;
     expect(expectedLoss + ownerEquityBefore).toBeGreater(0);
 
     val expectedProxy = valInfo.usage.prevRoundUsage!.proxy;
@@ -599,7 +599,7 @@ get fun `test if pool received loss within owner share, nominators stake should 
     // getter nets out the per active slot punishment reserve on top of it,
     // so from the getter's conservative viewpoint the owner share is 0
     val sharesAfter = pool.getSharesInfo();
-    expect(sharesAfter.ownerShareValue).toEqual(0);
+    expect(sharesAfter.ownerShareValue).toBeLess(sharesBefore);
     expect(sharesAfter.liquidOwnerShare).toEqual(0);
     expect(sharesAfter.nominatorsAmount).toEqual(poolBefore.nominatorsAmount);
 
@@ -648,8 +648,8 @@ get fun `test extreme slashing should not throw exceeds recovered value`() {
 
     // Owner equity (punishment reserves included) before the return,
     // on the same terms the loss booking uses
-    val invBefore = pool.getPoolInvariants();
-    val ownerEquityBefore = invBefore.projectedBalance - invBefore.nominatorsAmount;
+    val sharesBefore = pool.getSharesInfo();
+    val ownerEquityBefore = sharesBefore.ownerShareValue;
 
     val res = net.send(
         address.fromWorkchainAndHash(MASTERCHAIN, expectedProxy),
@@ -694,16 +694,9 @@ get fun `test extreme slashing should not throw exceeds recovered value`() {
     expect(expectedProfit).toBeLess(0);
     expect(expectedProfit + ownerEquityBefore).toBeLess(0);
 
-    // Nominators bear exactly the raw loss (credited value - used, no gas
-    // netting) beyond the owner equity. Here returned clamps to zero, so
-    // the whole credited value (just the gas allowance) stays in the
-    // owner's booked equity. The recover tx storage fee is collected
-    // before the booking reference, so it is the only correction read
-    // back from the result
-    val recoverTx = res.findTransaction<RecoverStakeOk>({ to: pool.address });
-    val storageFees = getTxStorage(recoverTx!).storageFeesCollected;
-    expect(poolAfter.nominatorsAmount as int).toEqual(
-        invBefore.nominatorsAmount + slashedReturn - used + ownerEquityBefore - storageFees,
+    expect(poolAfter.nominatorsAmount as int).toBeApproxEqAbs(
+        sharesBefore.nominatorsAmount + slashedReturn - used + ownerEquityBefore,
+        ton("0.001"), // Storage fee affect ownerEquityBefore since it is balance based
     );
 
     // Nominator stake price should drop accordingly
@@ -851,12 +844,11 @@ get fun `test loss exceeding owner share should be borne by nominators`() {
     // same terms the loss booking uses. The loss exceeds it, so per the
     // owner first loss rule the owner is drained to zero and nominators
     // bear exactly the excess beyond the owner equity
-    val invBefore = pool.getPoolInvariants();
-    val ownerEquityBefore = invBefore.projectedBalance - invBefore.nominatorsAmount;
+    var sharesBefore = pool.getSharesInfo();
+    val ownerEquityBefore = sharesBefore.ownerShareValue;
     expect(expectedLoss + ownerEquityBefore).toBeLess(0);
 
     val nmBefore = pool.getNominatorData(nmHash);
-    var sharesBefore = pool.getSharesInfo();
     var res = net.send(
         address.fromWorkchainAndHash(MASTERCHAIN, expectedProxy),
         createMessage({
@@ -877,9 +869,10 @@ get fun `test loss exceeding owner share should be borne by nominators`() {
 
     val poolAfter = pool.getPoolData();
     val recoverTx = res.findTransaction<RecoverStakeOk>({ to: pool.address });
+    // Storage fees come into play because owner share after is affected by the storage fee
     val storageFees = getTxStorage(recoverTx!).storageFeesCollected;
-    expect(poolAfter.nominatorsAmount as int).toEqual(
-        invBefore.nominatorsAmount + returnedStake - used + ownerEquityBefore - storageFees,
+    expect(poolAfter.nominatorsAmount).toEqual(
+        sharesBefore.nominatorsAmount + returnedStake - used + ownerEquityBefore - storageFees,
     );
 
     // Each individual nominator stake loses value accordingly

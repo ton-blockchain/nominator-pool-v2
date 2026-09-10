@@ -941,11 +941,17 @@ get fun get_shares_info(): GetSharesInfoResult {
 
     val totalBalance = availableBalance + validators.stakeUsed;
     val ownerShare = max(
-        totalBalance - storage.nominatorsAmount -
-        getMaxPunishmentInt(validators.minTonPerValidator) * validators.activeSlots,
+        totalBalance - storage.nominatorsAmount,
         0,
     );
-    var liquid = max(min(ownerShare, availableBalance - withdrawalsEst), 0);
+    var liquid = max(
+        min(
+            ownerShare -
+            getMaxPunishmentInt(validators.minTonPerValidator) * validators.activeSlots,
+            availableBalance - withdrawalsEst,
+        ),
+        0,
+    );
     // assert mirror logic
     if (storage.halted || totalBalance <= storage.nominatorsAmount) {
         liquid = 0;
