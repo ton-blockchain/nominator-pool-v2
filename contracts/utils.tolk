@@ -59,3 +59,7 @@ fun getMaxPunishmentInt(stake: int): int {
 fun address.getHash(self): uint256 {
     return self.getWorkchainAndHash().1;
 }
+
+fun calcOwnerShare(availableBalance: coins, stakeUsed: coins, nominatorsAmount: coins): coins {
+    return availableBalance + stakeUsed - nominatorsAmount;
+}

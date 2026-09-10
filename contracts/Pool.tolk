@@ -584,11 +584,11 @@ fun onInternalMessage(in: InMessage) {
                     var nominatorsProfit = max(profit - ownerShare, 0);
                     if (profit < 0) {
                         val curOwnerShare = calcOwnerShare(
+                            contract.getOriginalBalance() - POOL_MIN_STORAGE - returned -
+                            storage.pendingDeposits,
                             usedBefore, // This way we get owner share before the return
                             storage.nominatorsAmount,
-                            storage.pendingDeposits,
-                        )
-                        - returned;
+                        );
 
                         // If current owner share is positive, book negative part as nominators loss.
                         // Otherwise owner is already under water, book full owner loss part to the
@@ -939,9 +939,8 @@ get fun get_shares_info(): GetSharesInfoResult {
     val availableBalance = contract.getOriginalBalance() - storage.pendingDeposits -
     POOL_MIN_STORAGE;
 
-    val totalBalance = availableBalance + validators.stakeUsed;
     val ownerShare = max(
-        totalBalance - storage.nominatorsAmount,
+        calcOwnerShare(availableBalance, validators.stakeUsed, storage.nominatorsAmount),
         0,
     );
     var liquid = max(
@@ -953,7 +952,7 @@ get fun get_shares_info(): GetSharesInfoResult {
         0,
     );
     // assert mirror logic
-    if (storage.halted || totalBalance <= storage.nominatorsAmount) {
+    if (storage.halted || ownerShare == 0) {
         liquid = 0;
     }
 

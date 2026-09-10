@@ -16,16 +16,6 @@ type OwnerMessages =
     | RemoveValidator
     | OwnerWithdrawal
 
-fun calcOwnerShare(
-    stakeUsed: coins,
-    nominatorsAmount: coins,
-    pendingDeposits: coins,
-): coins {
-    val availableBalance = contract.getOriginalBalance() - pendingDeposits - POOL_MIN_STORAGE;
-    val totalBalance = availableBalance + stakeUsed;
-    return totalBalance - nominatorsAmount;
-}
-
 fun processOwnerAction(msgSlice: slice, storage: Storage, sender: address, value: coins): bool {
     val msg = lazy OwnerMessages.fromSlice(msgSlice);
     var handled = true;
@@ -131,15 +121,19 @@ fun processOwnerAction(msgSlice: slice, storage: Storage, sender: address, value
                     storage.nominatorsAmount,
                     storage.poolSupply,
                 );
-                val pendingAmounts = storage.pendingDeposits;
 
-                val availableBalance = contract.getOriginalBalance() - value - pendingAmounts -
+                val availableBalance = contract.getOriginalBalance() - value -
+                storage.pendingDeposits -
                 POOL_MIN_STORAGE;
 
-                val totalBalance = availableBalance + validators.stakeUsed;
-                assert(totalBalance > storage.nominatorsAmount, ErrorsPool.Insolvent);
+                val totalOwnerShare = calcOwnerShare(
+                    availableBalance,
+                    validators.stakeUsed,
+                    storage.nominatorsAmount,
+                );
+                assert(totalOwnerShare > 0, ErrorsPool.Insolvent);
 
-                val ownerShare = totalBalance - storage.nominatorsAmount -
+                val ownerShare = totalOwnerShare -
                 getMaxPunishmentInt(validators.minTonPerValidator) * validators.activeSlots;
                 val withdrawable = min(ownerShare, availableBalance - withdrawalsEst);
                 assert(msg.amount <= withdrawable, ErrorsPool.NotEnoughPoolBalance);
@@ -227,10 +221,13 @@ fun processOwnerAction(msgSlice: slice, storage: Storage, sender: address, value
             try {
                 assert(sender == storage.owner, ErrorsPool.NotOwner);
                 var validators = lazy storage.validators.load();
-                val totalBalance = contract.getOriginalBalance() - value - storage.pendingDeposits -
-                POOL_MIN_STORAGE +
-                validators.stakeUsed;
-                assert(totalBalance > storage.nominatorsAmount, ErrorsPool.Insolvent);
+                val ownerEquity = calcOwnerShare(
+                    contract.getOriginalBalance() - value - storage.pendingDeposits -
+                    POOL_MIN_STORAGE,
+                    validators.stakeUsed,
+                    storage.nominatorsAmount,
+                );
+                assert(ownerEquity > 0, ErrorsPool.Insolvent);
                 storage.finalizeRound(validators.rotateRoundQuick(storage.roundIndex), value);
                 var nominators = lazy storage.nominators.load();
 

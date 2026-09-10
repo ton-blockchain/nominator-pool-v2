@@ -19,10 +19,12 @@ fun Storage.handleTextComment(mutate self, comment: slice, sender: address, valu
     );
 
     var validators = self.validators.load();
-    val totalBalance = contract.getOriginalBalance() - value - self.pendingDeposits -
-    POOL_MIN_STORAGE +
-    validators.stakeUsed;
-    assert(totalBalance > self.nominatorsAmount, ErrorsPool.Insolvent);
+    val ownerEquity = calcOwnerShare(
+        contract.getOriginalBalance() - value - self.pendingDeposits - POOL_MIN_STORAGE,
+        validators.stakeUsed,
+        self.nominatorsAmount,
+    );
+    assert(ownerEquity > 0, ErrorsPool.Insolvent);
     self.finalizeRound(validators.rotateRoundQuick(self.roundIndex), value);
     self.validators = validators.toCell();
 
