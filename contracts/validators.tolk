@@ -6,6 +6,10 @@ import "fees"
 import "messages"
 import "types"
 
+fun ValidatorsData.getPunishment(self): int {
+    return getMaxPunishmentInt(self.maxTonPerValidator);
+}
+
 fun ValidatorsData.assertValidatorLimit(self, limit: ValidatorLimit) {
     match (limit) {
         ValidatorLimitTon => {

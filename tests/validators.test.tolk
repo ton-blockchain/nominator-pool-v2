@@ -519,6 +519,47 @@ get fun `test pool should account for slashing reserves from owner share`() {
     );
 }
 
+get fun `test punishment config raised after validator addition should block new stake with undercapitalized owner`() {
+    val (elector, stakes, _limits) = setupElector();
+    val (pool, owner, _notOwner, _validator) = setupDeployedPool();
+
+    // A fat nominator funds the stake itself, while the owner keeps only
+    // the bootstrap equity left on the pool after init
+    val fatNm = testing.treasury("FatCat");
+    assertPoolDepositInstant(pool, fatNm.address, ton("200000"));
+
+    // Validator is added under the default flat fine regime
+    val addedValidator = setupRandomValidator(pool, owner.address);
+
+    val stake = stakes.minStake * 2;
+    val elections = announceElections(elector);
+
+    // Under the flat fine the owner equity covers the per slot reserve,
+    // so the stake is possible
+    expect(pool.getValidatorInfo(addedValidator).stakeable).toBeGreaterOrEqual(stake);
+
+    // The network raises the fine to a flat 101 TON plus ~1% of the stake
+    setProportionalFine(PROPORTIONAL_FINE_DEFAULT);
+
+    val validatorsData = lazy pool.getPoolData().validators.load();
+    val raisedPunishment = pool.getMaxPunishment(validatorsData.maxTonPerValidator);
+    expect(pool.getValidatorInfo(addedValidator).stakeable).toEqual(0);
+
+    // So the new stake is rejected with the undercapitalized owner error
+    assertNewStakeFailed(
+        ErrorsPool.OwnerShareIsUndercapitalized,
+        addedValidator,
+        pool,
+        elections,
+        stake,
+    );
+
+    pool.sendAddFunds(owner.address, DEFAULT_QUERY_ID, { value: raisedPunishment - ton("101") });
+    expect(pool.getValidatorInfo(addedValidator).stakeable).toBeGreater(0);
+
+    assertPoolNewStake(addedValidator, pool, elector, elections, stake);
+}
+
 get fun `test should not allow new stake messages without queryId`() {
     val (elector, _stakes, _limits) = setupElector();
     var (pool, _owner, _notOwner, validator, _nominators) = setupPoolWithNominators(10);

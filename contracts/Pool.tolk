@@ -388,7 +388,7 @@ fun onInternalMessage(in: InMessage) {
                 validators.stakeUsed += stakeAmountSent;
                 validators.activeSlots += 1;
                 assert(ownerShare >=
-                getMaxPunishmentInt(validators.minTonPerValidator) *
+                validators.getPunishment() *
                 validators.activeSlots, ErrorsPool.OwnerShareIsUndercapitalized);
                 val curTime = blockchain.now();
                 assert(curTime >
@@ -887,10 +887,7 @@ get fun get_validator_info(address: address): GetValidatorInfo {
             stakeable = 0;
         }
         val ownerShare = total - storage.nominatorsAmount + pendingWithdrawalAmount;
-        if (
-            ownerShare <
-            getMaxPunishmentInt(validators.minTonPerValidator) * (validators.activeSlots + 1)
-        ) {
+        if (ownerShare < validators.getPunishment() * (validators.activeSlots + 1)) {
             stakeable = 0;
         }
     }
@@ -945,8 +942,7 @@ get fun get_shares_info(): GetSharesInfoResult {
     );
     var liquid = max(
         min(
-            ownerShare -
-            getMaxPunishmentInt(validators.minTonPerValidator) * validators.activeSlots,
+            ownerShare - validators.getPunishment() * validators.activeSlots,
             availableBalance - withdrawalsEst,
         ),
         0,

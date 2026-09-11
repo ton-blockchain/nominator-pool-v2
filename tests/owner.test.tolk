@@ -13,6 +13,7 @@ import "@contracts/errors"
 import "@contracts/fees"
 import "@contracts/messages"
 import "@contracts/types"
+import "@contracts/utils"
 import "@contracts/validators"
 import "@tests/deploy-utils"
 import "@tests/elector-utils"
@@ -86,12 +87,109 @@ get fun `test owner should be able to add more validators`() {
     }
 }
 
+get fun `test owner add validator should demand maxStake based reserve when proportional fine is active`() {
+    // Punishment regime with a clearly distinguishable proportional part:
+    // a flat 101 TON fine plus ~5% of the stake, with all severity and
+    setProportionalFine(PROPORTIONAL_FINE_DEFAULT);
+
+    val (pool, owner, _notOwner, _validator, _nominators) = setupPoolWithNominators(10);
+
+    val poolBefore = pool.getPoolData();
+    val validatorsBefore = lazy poolBefore.validators.load();
+
+    val minStakePunishment = pool.getMaxPunishment(0); // clamps up to minTonPerValidator
+    val maxStakePunishment = pool.getMaxPunishment(validatorsBefore.maxTonPerValidator);
+
+    // Proportional fine is taking effect: the punishment scales with the stake,
+    // so it exceeds the flat part and grows from minTon to maxTon per validator
+    expect(minStakePunishment).toBeGreater(ton("101"));
+    expect(maxStakePunishment).toBeGreater(minStakePunishment);
+
+    // Check the expected formula
+    val expectedPunishment = min(
+        validatorsBefore.maxTonPerValidator as int,
+        ton("101") +
+        mulDivQuiet(
+            validatorsBefore.maxTonPerValidator,
+            (1 << 32) / 100 * PROPORTIONAL_FINE_DEFAULT,
+            1 << 32,
+        ),
+    );
+    expect(maxStakePunishment).toEqual(expectedPunishment);
+
+    val testValidator = address.fromWorkchainAndHash(MASTERCHAIN, random.uint256());
+
+    // Old value
+    val minStakeBasedValue = (minStakePunishment + PROXY_MIN_STORAGE) * 2 + ton("1");
+
+    val stateBefore = getAccountData(pool.address);
+    val balanceBefore = testing.getAccountBalance(pool.address);
+    val rejected = pool.sendAddValidator(
+        owner.address,
+        DEFAULT_QUERY_ID,
+        testValidator,
+        RoundAllowance.InAllRounds,
+        null,
+        { value: minStakeBasedValue },
+    );
+
+    // The pool demands a maxStake based slashing reserve now, which the
+    // minStake based value can't cover, so the add is rejected and refunded
+    expect(rejected).toHaveRefund<AddValidator>({
+        from: pool.address,
+        to: owner.address,
+        previousState: stateBefore,
+        initialBalance: balanceBefore,
+        error: ErrorsPool.NotEnoughGas,
+    });
+
+    val validatorsRejected = lazy pool.getPoolData().validators.load();
+    expect(validatorsRejected.validators.exists(testValidator)).toBeFalse();
+    expect(validatorsRejected.activeValidators).toEqual(validatorsBefore.activeValidators);
+
+    // Value sized by the maxStake based reserve is accepted
+    val maxStakeBasedValue = (maxStakePunishment + PROXY_MIN_STORAGE) * 2 + ton("1");
+    val balanceBeforeAdd = testing.getAccountBalance(pool.address);
+    val res = pool.sendAddValidator(
+        owner.address,
+        DEFAULT_QUERY_ID,
+        testValidator,
+        RoundAllowance.InAllRounds,
+        null,
+        { value: maxStakeBasedValue },
+    );
+    val addTx = res.findTransaction<AddValidator>(
+        {
+            to: pool.address,
+            from: owner.address,
+        },
+    );
+    expect(addTx != null).toBeTrue();
+    // Two proxy deploys and the refund
+    expect(getTxActionPh(addTx!).msgsCreated).toEqual(3);
+
+    // The pool retains the demanded maxStake based reserve for both rounds
+    val balanceAfter = testing.getAccountBalance(pool.address);
+    expect(balanceAfter as int).toBeApproxEqAbs(
+        balanceBeforeAdd + maxStakePunishment * 2,
+        1,
+    );
+
+    val validatorsAfter = lazy pool.getPoolData().validators.load();
+    expect(validatorsAfter.validators.exists(testValidator)).toBeTrue();
+    expect(validatorsAfter.activeValidators).toEqual(validatorsBefore.activeValidators + 1);
+
+    val validatorInfo = pool.getValidatorInfo(testValidator).validator;
+    expect(validatorInfo.usageState).toEqual(0);
+    expect(validatorInfo.oddProxy != null).toBeTrue();
+    expect(validatorInfo.evenProxy != null).toBeTrue();
+}
+
 get fun `test owner should be able to add only MAX_VALIDATORS`() {
     val (pool, owner, _notOwner, _validator, _nominators) = setupPoolWithNominators(10);
 
     val maxPunishment = pool.getMaxPunishment(0);
     val minValue = (maxPunishment + PROXY_MIN_STORAGE) * 2 + ton("1");
-
     val queryId = random.range(128);
     var i = 0;
     repeat (MAX_VALIDATORS - 1) {
