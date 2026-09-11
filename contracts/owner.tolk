@@ -185,6 +185,7 @@ fun processOwnerAction(msgSlice: slice, storage: Storage, sender: address, value
                     }
                     GlobalNominatorsLimit => {
                         var nominators = lazy storage.nominators.load();
+                        assert(msg.limit.maxNm <= MAX_NOMINATORS, ErrorsPool.TooManyNominators);
                         storage.maxNominators = msg.limit.maxNm;
                         nominators.minStake = msg.limit.minStake;
                         storage.nominators = nominators.toCell();

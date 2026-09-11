@@ -622,18 +622,19 @@ get fun `test owner should be able to update nominator parameters`(
 ) {
     val (pool, owner, _notOwner, _validator) = setupDeployedPool();
 
+    val boundedMax = fuzz.bound(newMaxNm, 0, MAX_NOMINATORS);
     val _res = pool.sendUpdateLimits(
         owner.address,
         DEFAULT_QUERY_ID,
         GlobalNominatorsLimit {
-            maxNm: newMaxNm,
+            maxNm: boundedMax,
             minStake: newMinStake,
         },
     );
 
     val poolAfter = pool.getPoolData();
     val nmAfter = poolAfter.nominators.load();
-    expect(poolAfter.maxNominators).toEqual(newMaxNm);
+    expect(poolAfter.maxNominators).toEqual(boundedMax);
     expect(nmAfter.minStake).toEqual(newMinStake);
 }
 
@@ -656,6 +657,35 @@ get fun `test only owner should be able to update nominator parameters`(
     expect(
         res,
     ).toHaveRefund<UpdateLimits>({ from: pool.address, to: notOwner.address, error: ErrorsPool.NotOwner, previousState: stateBefore });
+}
+
+get fun `test owner should not be able to set more than MAX_NOMINATORS nominators`() {
+    val (pool, owner, _notOwner, _validator) = setupDeployedPool();
+
+    val poolBefore = pool.getPoolData();
+    val stateBefore = getAccountData(pool.address);
+    val balanceBefore = testing.getAccountBalance(pool.address);
+
+    val res = pool.sendUpdateLimits(
+        owner.address,
+        DEFAULT_QUERY_ID,
+        GlobalNominatorsLimit {
+            maxNm: MAX_NOMINATORS + 1,
+            minStake: poolBefore.nominators.load().minStake,
+        },
+    );
+
+    expect(res).toHaveRefund<UpdateLimits>({
+        to: owner.address,
+        from: pool.address,
+        initialBalance: balanceBefore,
+        previousState: stateBefore,
+        error: ErrorsPool.TooManyNominators,
+    });
+
+    val poolAfter = pool.getPoolData();
+    expect(poolAfter.maxNominators).toEqual(poolBefore.maxNominators);
+    expect(poolAfter.nominators.load().minStake).toEqual(poolBefore.nominators.load().minStake);
 }
 
 @test.fuzz(3)

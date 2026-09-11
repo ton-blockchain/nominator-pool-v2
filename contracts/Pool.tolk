@@ -159,6 +159,7 @@ fun onInternalMessage(in: InMessage) {
         };
         validatorsData.validators.set(msg.mainValidator, mainValidator);
         assertStakingLimit(msg.minTonPerValidator, msg.maxTonPerValidator);
+        assert(nmSettings.maxNominators <= MAX_NOMINATORS, ErrorsPool.TooManyNominators);
         val newStorage = Storage {
             owner: storage.owner,
             poolId: storage.poolId,

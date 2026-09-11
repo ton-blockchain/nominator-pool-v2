@@ -22,9 +22,13 @@ fun main() {
         "Max nominators:",
         poolData.maxNominators as int,
     );
-    if (newMaxNmRaw < 0 || newMaxNmRaw > 1023) {
+    if (newMaxNmRaw < 0 || newMaxNmRaw > MAX_NOMINATORS) {
         Assert.fail(
-            format("Max nominators {} is out of range (0..1023)", newMaxNmRaw),
+            format(
+                "Max nominators {} is out of range (0..{})",
+                newMaxNmRaw,
+                MAX_NOMINATORS,
+            ),
         );
     }
     // SAFETY: range-checked above to fit uint10.

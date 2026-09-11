@@ -60,7 +60,7 @@ get fun `test existing nominator should be able to deposit in full pool`() {
         nominators,
     ) = setupFullyBookedPool();
 
-    val randomNm = nominators.get(random.range(1022));
+    val randomNm = nominators.get(random.range(512 - 1));
     val nmHash = randomNm.getHash();
 
     val nmBefore = pool.getNominatorData(nmHash);
@@ -160,7 +160,7 @@ get fun `test text comment messages should be parsed strictly`() {
     });
 }
 
-get fun `test pool has a limit of 1023 nominators`() {
+get fun `test pool has a limit of 512 nominators`() {
     val (
         pool,
         _owner,
@@ -174,7 +174,7 @@ get fun `test pool has a limit of 1023 nominators`() {
 
     val poolBefore = pool.getPoolData();
     val nmBefore = poolBefore.nominators.load();
-    expect(nmBefore.nmCount).toEqual(1023);
+    expect(nmBefore.nmCount).toEqual(512);
     val res = pool.sendTextComment(
         testNm.address,
         "d".beginParse(),
@@ -256,9 +256,9 @@ get fun `test withdrawal should reject when no deposit ever made (round closed)`
 }
 
 get fun `test simple withdrawal on large nm dict`() {
-    val (pool, _owner, _notOwner, _validator, nominators) = setupPoolWithNominators(1023);
+    val (pool, _owner, _notOwner, _validator, nominators) = setupPoolWithNominators(512);
 
-    val pickNm = nominators.get(random.range(1023 - 1));
+    val pickNm = nominators.get(random.range(512 - 1));
     asssertSimpleWithdawal(pool, pickNm);
 }
 
@@ -503,7 +503,7 @@ get fun `test reward withdrawal should be rejected when no profit has been accru
 
 get fun `test reward withdrawal should be rejected when share delta is zero`() {
     val customNmSettings = NominatorsSettings {
-        maxNominators: 1023,
+        maxNominators: 512,
         minStake: ton("1000"),
         minWithdrawableRewards: 0,
         whitelist: [],

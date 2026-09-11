@@ -150,10 +150,10 @@ fun setupFullyBookedPool(): (
     lisp_list<address>,
 ) {
     // Idea here is to create a maxed out pool
-    // 127 validators + 1023 nominators
+    // 127 validators + 512 nominators
     // To test gas consumption at a maximum.
 
-    var (pool, owner, notOwner, mainValidator, nominators) = setupPoolWithNominators(1023);
+    var (pool, owner, notOwner, mainValidator, nominators) = setupPoolWithNominators(512);
 
     val randomPickedIdx = random.range(31);
     var randomPickedValidator: address? = null;
