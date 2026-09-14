@@ -45,7 +45,7 @@ get fun `test should deploy with specified parameters`(
 
     expect(testing.isDeployed(pool.address)).toBeFalse();
 
-    val boundedNm = fuzz.bound(maxNominators, 1, 1023);
+    val boundedNm = fuzz.bound(maxNominators, 1, MAX_NOMINATORS);
     val boundedShare = fuzz.bound(ownerShare, 0, (1 << 24) - 1);
     val deployMsg = createMessage({
         dest: { stateInit: pool.stateInit! },
@@ -167,7 +167,7 @@ get fun `test should only allow init from the owner address`(
 
     expect(testing.isDeployed(pool.address)).toBeFalse();
 
-    val boundedNm = fuzz.bound(maxNominators, 0, 1023);
+    val boundedNm = fuzz.bound(maxNominators, 0, MAX_NOMINATORS);
     val boundedShare = fuzz.bound(ownerShare, 0, (1 << 24) - 1);
     val deployMsg = createMessage({
         dest: poolStateInit,
@@ -287,6 +287,56 @@ get fun `test should not allow to init pool with maxTonPerValidator > network ma
     });
 
     expect(pool.getLimitsPerValidator().1).toEqual(networkLimits.maxStake);
+}
+
+get fun `test should not allow to init pool with more than MAX_NOMINATORS nominators`() {
+    val (pool, owner, _notOwner, _validator) = setupDeployTest();
+
+    val (_share, _validatorsSettings, nmSettings) = defaultDeployParams();
+
+    val res = net.send(
+        owner.address,
+        createMessage({
+            bounce: false,
+            dest: { stateInit: pool.stateInit! },
+            value: ton("250"),
+            body: defaultDeployBody({
+                nominatorsSettings: NominatorsSettings {
+                    maxNominators: MAX_NOMINATORS + 1,
+                    minStake: nmSettings.minStake,
+                    minWithdrawableRewards: nmSettings.minWithdrawableRewards,
+                    whitelist: nmSettings.whitelist,
+                },
+            }),
+        }),
+    );
+    expect(res).toHaveFailedTx({
+        to: pool.address,
+        exitCode: ErrorsPool.TooManyNominators,
+    });
+
+    // The cap itself is still accepted.
+    // The account is already deployed by the failed attempt above (bounce: false),
+    // so only a successful init transaction is expected here.
+    val res2 = net.send(
+        owner.address,
+        createMessage({
+            bounce: false,
+            dest: { stateInit: pool.stateInit! },
+            value: ton("250"),
+            body: defaultDeployBody({
+                nominatorsSettings: NominatorsSettings {
+                    maxNominators: MAX_NOMINATORS,
+                    minStake: nmSettings.minStake,
+                    minWithdrawableRewards: nmSettings.minWithdrawableRewards,
+                    whitelist: nmSettings.whitelist,
+                },
+            }),
+        }),
+    );
+    expect(res2).toHaveSuccessfulTx<InitPoolMessage>({ to: pool.address });
+    expect(res2).toHaveSuccessfulTx<InitPoolSuccess>({ from: pool.address, to: owner.address });
+    expect(pool.getPoolData().maxNominators).toEqual(MAX_NOMINATORS);
 }
 
 get fun `test should not allow to init the pool twice`() {

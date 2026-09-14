@@ -158,7 +158,7 @@ The original limits and behavior above are based on its [pool-v1 README](https:/
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `maxNominators` | `uint10` | Maximum number of distinct nominator entries. Starting an empty pool at `0` creates owner-only mode. Lowering the value later does not block existing nominators from topping up. |
+| `maxNominators` | `uint10` | Maximum number of distinct nominator entries, capped at `512` (`MAX_NOMINATORS`) by the contract at init and via `UpdateLimits`. Starting an empty pool at `0` creates owner-only mode. Lowering the value later does not block existing nominators from topping up. |
 | `minStake` | `coins` | Minimum deposit amount accepted from a nominator. This is the true configurable economic gate; the contract also requires a small gas constant on top of this (see `DEPOSIT_GAS` in the fee table), but that constant is not itself a fee charged to the owner. |
 | `minWithdrawableRewards` | `coins` | Minimum profit a nominator must have accrued before a reward withdrawal (`"r"` comment) is accepted. |
 | `whitelist` | `map<address, bool>` | Optional nominator whitelist. If the map is non-empty, only addresses present in it are allowed to deposit. If empty, all addresses are accepted. Admission is presence-based: the boolean value is not consulted, so any stored value is equivalent. Can be updated post-initialization via `UpdateNominatorsWhitelist`. |
@@ -214,7 +214,7 @@ BATCH=1 \
   INIT_VALUE=100000000000000 OWNER_SHARE=8388608 \
   MAX_TON_PER_VALIDATOR=10000000000000000 MIN_TON_PER_VALIDATOR=300000000000000 \
   REFUND_BONUS=3000000000 \
-  MAX_NOMINATORS=1023 MIN_STAKE=1000000000000 MIN_WITHDRAWABLE_REWARDS=1000000000 \
+  MAX_NOMINATORS=512 MIN_STAKE=1000000000000 MIN_WITHDRAWABLE_REWARDS=1000000000 \
   acton script scripts/init-pool.tolk --net mainnet
 
 # Add second validator
@@ -275,7 +275,7 @@ BATCH=1 \
   INIT_VALUE=100000000000000 OWNER_SHARE=8388608 \
   MAX_TON_PER_VALIDATOR=10000000000000000 MIN_TON_PER_VALIDATOR=300000000000000 \
   REFUND_BONUS=3000000000 \
-  MAX_NOMINATORS=1023 MIN_STAKE=1000000000000 MIN_WITHDRAWABLE_REWARDS=1000000000 \
+  MAX_NOMINATORS=512 MIN_STAKE=1000000000000 MIN_WITHDRAWABLE_REWARDS=1000000000 \
   acton script scripts/init-pool.tolk --net mainnet
 
 # Add second and third validators

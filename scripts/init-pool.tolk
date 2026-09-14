@@ -74,8 +74,8 @@ fun main() {
 
     val maxNominators = promptIntWithEnvOrConst(
         "MAX_NOMINATORS",
-        "Max nominators (0..1023):",
-        1023,
+        format("Max nominators (0..{}):", MAX_NOMINATORS),
+        MAX_NOMINATORS,
     );
     val minStake = promptCoins("MIN_STAKE", "Min nominator stake (TON):", "1000");
     val minWithdrawableRewards = promptCoins(
@@ -102,11 +102,12 @@ fun main() {
             ),
         );
     }
-    if (maxNominators < 0 || maxNominators > 1023) {
+    if (maxNominators < 0 || maxNominators > MAX_NOMINATORS) {
         Assert.fail(
             format(
-                "Max nominators {} is out of range (0..1023)",
+                "Max nominators {} is out of range (0..{})",
                 maxNominators,
+                MAX_NOMINATORS,
             ),
         );
     }
@@ -151,7 +152,7 @@ fun main() {
     println("Init value:       {:gram}", deployValue);
 
     // SAFETY: ownerShare is range-checked above to fit uint25 (SHARE_BASE = 2^24).
-    // SAFETY: maxNominators is range-checked above to fit uint10 (0..1023).
+    // SAFETY: maxNominators is range-checked above to fit uint10 and the on-chain MAX_NOMINATORS cap.
     val initMessage = createMessage({
         bounce: false,
         value: deployValue,

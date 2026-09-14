@@ -57,7 +57,7 @@ fun defaultDeployParams(): (int, ValidatorInitSettings, NominatorsSettings) {
     };
 
     val nmSettings = NominatorsSettings {
-        maxNominators: 1023,
+        maxNominators: 512,
         minStake: ton("1000"),
         minWithdrawableRewards: ton("1"),
     };

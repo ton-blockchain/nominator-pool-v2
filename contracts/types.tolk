@@ -4,6 +4,7 @@ const SHARE_BASE = 256 * 256 * 256
 const ROUNDS_DELAY = 3
 const MAX_NM_DEPTH = 15
 const MAX_VALIDATORS = 32
+const MAX_NOMINATORS = 512
 
 struct Nominator {
     share: coins
