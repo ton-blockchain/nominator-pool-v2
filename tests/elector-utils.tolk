@@ -17,6 +17,8 @@ import "@wrappers/ElectorCode.gen"
 
 const PARTICIPANTS_IDX = 16
 const STAKES_IDX = 17
+const PUNISHMENT_IDX = 40
+const PROPORTIONAL_FINE_DEFAULT = 1 // 1%
 const CUR_VSET_IDX = 34
 const NEXT_VSET_IDX = 36
 const DEFAULT_MIN_STAKE = ton("10000")
@@ -82,6 +84,28 @@ fun setupSimplifiedElections(): (StakesConfig, ParticipantsConfig) {
     testing.setConfig(config);
 
     return (stakeConfig, electionsConf);
+}
+
+fun setProportionalFine(stakePercentage: coins) {
+    setPunishmentConfig({
+        defaultFlatFine: ton("101"),
+        defaultProportionalFine: (1 << 32) / 100 * stakePercentage,
+        severityFlatMult: 256,
+        severityProportinalMult: 256,
+        unpunishableInterval: 0,
+        longInterval: 8192,
+        longFlatMult: 256,
+        longProportinalMult: 256,
+        mediumInterval: 8192,
+        mediumFlatMult: 256,
+        mediumProportionalMult: 256,
+    });
+}
+
+fun setPunishmentConfig(conf: PunishmentConfig) {
+    var config = testing.getConfig();
+    config.set(PUNISHMENT_IDX, conf.toCell());
+    testing.setConfig(config);
 }
 
 fun getConfigAddress(): address {

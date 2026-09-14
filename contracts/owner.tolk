@@ -36,10 +36,13 @@ fun processOwnerAction(msgSlice: slice, storage: Storage, sender: address, value
                 };
 
                 val nRounds = max(msg.roundAllowance as int - 1, 1);
-                val reserveAmount = nRounds * getMaxPunishmentInt(validators.minTonPerValidator);
+                val reserveAmount = nRounds * validators.getPunishment();
                 val valueLeft = value - NEW_VALIDATOR_FEE - reserveAmount;
 
-                reserveGramsOnBalance(reserveAmount, RESERVE_MODE_INCREASE_BY_ORIGINAL_BALANCE);
+                reserveGramsOnBalance(
+                    reserveAmount,
+                    RESERVE_MODE_INCREASE_BY_ORIGINAL_BALANCE | RESERVE_MODE_BOUNCE_ON_ACTION_FAIL,
+                );
 
                 newValidator.deployProxy(msg.validator, storage.owner, valueLeft, msg.queryId);
                 val newAdded = validators.validators.addIfNotExists(msg.validator, newValidator);
@@ -121,16 +124,20 @@ fun processOwnerAction(msgSlice: slice, storage: Storage, sender: address, value
                     storage.nominatorsAmount,
                     storage.poolSupply,
                 );
-                val pendingAmounts = storage.pendingDeposits;
 
-                val availableBalance = contract.getOriginalBalance() - value - pendingAmounts -
+                val availableBalance = contract.getOriginalBalance() - value -
+                storage.pendingDeposits -
                 POOL_MIN_STORAGE;
 
-                val totalBalance = availableBalance + validators.stakeUsed;
-                assert(totalBalance > storage.nominatorsAmount, ErrorsPool.Insolvent);
+                val totalOwnerShare = calcOwnerShare(
+                    availableBalance,
+                    validators.stakeUsed,
+                    storage.nominatorsAmount,
+                );
+                assert(totalOwnerShare > 0, ErrorsPool.Insolvent);
 
-                val ownerShare = totalBalance - storage.nominatorsAmount -
-                getMaxPunishmentInt(validators.minTonPerValidator) * validators.activeSlots;
+                val ownerShare = totalOwnerShare -
+                validators.getPunishment() * validators.activeSlots;
                 val withdrawable = min(ownerShare, availableBalance - withdrawalsEst);
                 assert(msg.amount <= withdrawable, ErrorsPool.NotEnoughPoolBalance);
                 reserveGramsOnBalance(
@@ -217,10 +224,13 @@ fun processOwnerAction(msgSlice: slice, storage: Storage, sender: address, value
             try {
                 assert(sender == storage.owner, ErrorsPool.NotOwner);
                 var validators = lazy storage.validators.load();
-                val totalBalance = contract.getOriginalBalance() - value - storage.pendingDeposits -
-                POOL_MIN_STORAGE +
-                validators.stakeUsed;
-                assert(totalBalance > storage.nominatorsAmount, ErrorsPool.Insolvent);
+                val ownerEquity = calcOwnerShare(
+                    contract.getOriginalBalance() - value - storage.pendingDeposits -
+                    POOL_MIN_STORAGE,
+                    validators.stakeUsed,
+                    storage.nominatorsAmount,
+                );
+                assert(ownerEquity > 0, ErrorsPool.Insolvent);
                 storage.finalizeRound(validators.rotateRoundQuick(storage.roundIndex), value);
                 var nominators = lazy storage.nominators.load();
 

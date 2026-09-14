@@ -388,7 +388,7 @@ fun onInternalMessage(in: InMessage) {
                 validators.stakeUsed += stakeAmountSent;
                 validators.activeSlots += 1;
                 assert(ownerShare >=
-                getMaxPunishmentInt(validators.minTonPerValidator) *
+                validators.getPunishment() *
                 validators.activeSlots, ErrorsPool.OwnerShareIsUndercapitalized);
                 val curTime = blockchain.now();
                 assert(curTime >
@@ -554,6 +554,7 @@ fun onInternalMessage(in: InMessage) {
 
             val profit = returned - stakeReturned.tonUsed;
 
+            val usedBefore = validators.stakeUsed;
             validators.stakeUsed = max(validators.stakeUsed - stakeReturned.tonUsed, 0);
             validators.activeSlots = max(validators.activeSlots - 1, 0);
 
@@ -580,7 +581,27 @@ fun onInternalMessage(in: InMessage) {
 
                 if (storage.nominatorsAmount > 0) {
                     val ownerShare = mulDivFloor(profit, storage.ownerShare, SHARE_BASE);
-                    val nominatorsProfit = profit - ownerShare;
+                    var nominatorsProfit = max(profit - ownerShare, 0);
+                    if (profit < 0) {
+                        val curOwnerShare = calcOwnerShare(
+                            contract.getOriginalBalance() - POOL_MIN_STORAGE - returned -
+                            storage.pendingDeposits,
+                            usedBefore, // This way we get owner share before the return
+                            storage.nominatorsAmount,
+                        );
+
+                        // If current owner share is positive, book negative part as nominators loss.
+                        // Otherwise owner is already under water, book full owner loss part to the
+                        // nominators.
+                        // In case owner share can cover the loss owner delta would be zero -> no loss propagates to the nominators
+                        val ownerDelta = curOwnerShare > 0
+                            ? min(
+                                curOwnerShare + profit,
+                                0,
+                            ) // + because both negative values, full profit
+                            : profit; // Full loss goes to nominators if no owner share available
+                        nominatorsProfit += ownerDelta;
+                    }
                     storage.nominatorsAmount = max(storage.nominatorsAmount + nominatorsProfit, 0);
                 }
 
@@ -866,10 +887,7 @@ get fun get_validator_info(address: address): GetValidatorInfo {
             stakeable = 0;
         }
         val ownerShare = total - storage.nominatorsAmount + pendingWithdrawalAmount;
-        if (
-            ownerShare <
-            getMaxPunishmentInt(validators.minTonPerValidator) * (validators.activeSlots + 1)
-        ) {
+        if (ownerShare < validators.getPunishment() * (validators.activeSlots + 1)) {
             stakeable = 0;
         }
     }
@@ -918,15 +936,19 @@ get fun get_shares_info(): GetSharesInfoResult {
     val availableBalance = contract.getOriginalBalance() - storage.pendingDeposits -
     POOL_MIN_STORAGE;
 
-    val totalBalance = availableBalance + validators.stakeUsed;
     val ownerShare = max(
-        totalBalance - storage.nominatorsAmount -
-        getMaxPunishmentInt(validators.minTonPerValidator) * validators.activeSlots,
+        calcOwnerShare(availableBalance, validators.stakeUsed, storage.nominatorsAmount),
         0,
     );
-    var liquid = max(min(ownerShare, availableBalance - withdrawalsEst), 0);
+    var liquid = max(
+        min(
+            ownerShare - validators.getPunishment() * validators.activeSlots,
+            availableBalance - withdrawalsEst,
+        ),
+        0,
+    );
     // assert mirror logic
-    if (storage.halted || totalBalance <= storage.nominatorsAmount) {
+    if (storage.halted || ownerShare == 0) {
         liquid = 0;
     }
 
