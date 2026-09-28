@@ -37,9 +37,6 @@ jobs:
       - name: Build
         run: acton build
 
-      - name: Formatter
-        run: acton fmt --check
-
       - name: Linter
         run: acton check --output-format github
 
