@@ -12,9 +12,9 @@ import "@contracts/types"
 import "@wrappers/Pool.gen"
 
 const DEFAULT_POOL_ID = 0
-const DEFAULT_DEPLOY_VALUE = ton("250")
-const DEFAULT_MSG_VALUE = ton("1")
-const DEFAULT_ADD_VALIDATOR_VALUE = ton("250")
+const DEFAULT_DEPLOY_VALUE = grams("250")
+const DEFAULT_MSG_VALUE = grams("1")
+const DEFAULT_ADD_VALIDATOR_VALUE = grams("250")
 const EMUL_SNAPSHOT_PATH = "build/cache/emul-snapshot.json"
 
 // Shows a confirmation dialog summarizing the pending transaction before it is

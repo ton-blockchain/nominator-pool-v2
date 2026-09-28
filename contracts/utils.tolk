@@ -33,7 +33,7 @@ fun getMaxPunishmentInt(stake: int): int {
     val punishmentConf = blockchain.configParam(40);
 
     if (punishmentConf == null) {
-        return ton("101");
+        return grams("101");
     }
 
     val parsedConf = PunishmentConfig.fromCell(punishmentConf);

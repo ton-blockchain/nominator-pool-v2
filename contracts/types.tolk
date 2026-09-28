@@ -54,7 +54,7 @@ struct ValidatorsData {
     stakeUsed: coins = 0
     minTonPerValidator: coins
     maxTonPerValidator: coins
-    refundBonus: uint33 = ton("3") as int
+    refundBonus: uint33 = grams("3") as int
     validators: map<address, Validator> = []
     curRound: Cell<RoundData>
     prevRound: Cell<RoundData>

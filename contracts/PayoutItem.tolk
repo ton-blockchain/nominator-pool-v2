@@ -11,8 +11,8 @@ contract PayoutItem {
     storageAtDeployment: ItemStorageNotInitialized
 }
 
-const MIN_STORAGE: int = ton("0.04")
-const BURN_NOTIFICATION_AMOUNT: int = ton("0.01")
+const MIN_STORAGE: int = grams("0.04")
+const BURN_NOTIFICATION_AMOUNT: int = grams("0.01")
 
 type ItemStorage = ItemStorageNotInitialized | ItemStorageInitialized
 
