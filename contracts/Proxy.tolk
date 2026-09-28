@@ -161,7 +161,7 @@ fun onInternalMessage(in: InMessage) {
         ) {
             // Something extreme happened and the whole stake is slashed
             // Make sure at least something reaches the pool, even at storage expense
-            outValue = max(in.valueCoins, ton("0.1"));
+            outValue = max(in.valueCoins, grams("0.1"));
             outMode = SEND_MODE_PAY_FEES_SEPARATELY;
         } else {
             // Replenish for others

@@ -70,7 +70,7 @@ fun handleNewStakeError(sender: address, value: int) {
         var round = stakeReturned.round;
         val delta = abs(stakeReturned.data.tonUsed - value);
         round.users.delete(addrHash);
-        if (delta <= ton("1")) {
+        if (delta <= grams("1")) {
             // If delta is withing newStake reserve
             // make it look like it never happen
             round.used = max(round.used - stakeReturned.data.tonUsed, 0);
@@ -119,7 +119,7 @@ fun onInternalMessage(in: InMessage) {
         }
 
         assert(in.valueCoins >=
-        reserveAmount + PROXY_MIN_STORAGE * nRounds + ton("1"), ErrorsPool.NotEnoughGas);
+        reserveAmount + PROXY_MIN_STORAGE * nRounds + grams("1"), ErrorsPool.NotEnoughGas);
 
         reserveGramsOnBalance(
             reserveAmount,
@@ -313,7 +313,7 @@ fun onInternalMessage(in: InMessage) {
             try {
                 assert(msg.queryId > 0, ErrorsPool.QueryIdRequired);
 
-                assert(in.valueCoins >= ton("1"), ErrorsPool.NotEnoughValueForNewStake);
+                assert(in.valueCoins >= grams("1"), ErrorsPool.NotEnoughValueForNewStake);
 
                 var validators = lazy storage.validators.load();
                 var valData = validators.getValidatorByAddress(
@@ -336,7 +336,7 @@ fun onInternalMessage(in: InMessage) {
                     estPendingWithdrawals,
                 ) = storage.getStakableBalance(in.valueCoins, validators.stakeUsed);
                 assert(msg.value <= availableBalance, ErrorsPool.NotEnoughPoolBalance);
-                val stakeAmountSent = msg.value - ton("1");
+                val stakeAmountSent = msg.value - grams("1");
 
                 assert(msg.value >= validators.minTonPerValidator, ErrorsPool.StakeBelowLimit);
                 if (valData.isBanned) {
@@ -610,7 +610,7 @@ fun onInternalMessage(in: InMessage) {
                     // Instead of rotating inplace, do it by chaining txs
                     val rotateMsg = createMessage<UpdateVset>({
                         bounce: false,
-                        value: ton("1"),
+                        value: grams("1"),
                         dest: contract.getAddress(),
                         body: UpdateVset { queryId: storage.roundIndex },
                     });

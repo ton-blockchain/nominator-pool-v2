@@ -127,7 +127,7 @@ fun main() {
     // required on top; it depends on network config 40 and cannot be
     // pre-computed off-chain here.
     val nRounds = max(roundAllowance as int - 1, 1);
-    val initFloor = POOL_MIN_STORAGE + PROXY_MIN_STORAGE * nRounds + ton("1");
+    val initFloor = POOL_MIN_STORAGE + PROXY_MIN_STORAGE * nRounds + grams("1");
     if (deployValue < initFloor) {
         Assert.fail(
             format(
